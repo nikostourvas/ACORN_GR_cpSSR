@@ -1,0 +1,399 @@
+---
+title: "ACORN cpSSR"
+output:
+  html_document:
+    keep_md: yes
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, cache = FALSE, dpi=300)
+```
+
+# Libraries
+```{r}
+library(dplyr)
+library(tidyr)
+library(poppr)
+library(pegas)
+library(ggplot2)
+library(cowplot)
+library(ggtree)
+library(ggrepel)
+library(PopGenUtils)
+library(viridis)
+library(ape)
+library(maps) # ggplot map
+library(scatterpie) # for pie charts
+```
+
+# Color schemes
+```{r}
+# wong=c("#000000","#E69F00","#56B4E9","#009E73","#006699","#D55E00","#CC79A7")
+# citrus=c("#F1932D", "#CAE0AB", "#E8601C", "#F7F056", "#F6C141", "#90C987", 
+         # "#AE76A3")
+wong=c("#000000","#E69F00","#56B4E9","#009E73","#F0E442","#006699","#D55E00","#CC79A7", "grey50")
+
+"cb_paired"=c("#A6CEE3","#1F78B4","#B2DF8A","#33A02C","#FB9A99","#E31A1C","#FDBF6F","#FF7F00","#CAB2D6","#6A3D9A","#FFFF99","#B15928")
+"cb_set3"=c("#8DD3C7","#FFFFB3","#BEBADA","#FB8072","#80B1D3","#FDB462","#B3DE69","#FCCDE5","#D9D9D9","#BC80BD","#CCEBC5","#FFED6F")
+"morris"=c("#4D94CC","#34648A","#8B658A","#9ACD32","#CC95CC","#9ACD32","#8B3A39","#CD6601","#CC5C5B","#8A4500")
+"krzywinski"=c("#006E82","#8214A0","#005AC8","#00A0FA","#FA78FA","#14D2DC","#AA0A3C","#FA7850","#0AB45A","#F0F032","#A0FA82","#FAE6BE")
+kelly <- c("#F2F3F4","#222222","#F3C300","#875692","#F38400","#A1CAF1","#BE0032","#C2B280","#848482","#008856","#E68FAC","#0067A5","#F99379","#604E97","#F6A600","#B3446C","#DCD300","#882D17","#8DB600", "#654522","#E25822","#2B3D26")
+
+kr12 <- c("#9F0162", "#009F81", "#FF5AAF", "#00FCCF", "#8400CD", "#008DF9", "#00C2F9", "#FFB2FD", "#A40122", "#E20134", "#FF6E3A", "#FFC33B")
+
+nikos <-c("#c6dbef","#9ecae1","#6baed6","#4292c6","#2171b5","#084594",
+          "#fdd0a2","#fdae6b","#fd8d3c","#f16913","#d94801","#8c2d04",
+          "#c7e9c0","#74c476",
+          "#A700FC","#FF3CFE", "#FFCCFE", "black", "yellow", "yellow", "yellow",
+          # ,"#41ab5d","#238b45","#005a32",
+          "white", "#7cfffa", "grey50", "grey50", #8c510a", "#dfc27d",
+          '#dadaeb','#bcbddc','#9e9ac8','#807dba','#6a51a3','#4a1486',
+          '#969696')
+
+three_species <- c(rep("#E69F00", times=10), rep("#56B4E9", times=8),"#009E73")
+colorbyregionpop <- c('#fcbba1','#fc9272','#fb6a4a','#de2d26','#a50f15',
+                      '#c6dbef','#9ecae1','#6baed6','#3182bd',
+                      '#a1d99b')
+```
+
+
+# Data input
+```{r}
+obj <- read.genalex(genalex = "../data/20230103_data.csv", ploidy = 1)
+obj
+summary(object = obj)
+```
+
+## Filter Individuals
+### MLG - Multilocus Genotype Analysis
+```{r mlg-original, include=T}
+# convert to genclone
+obj_clone <- as.genclone(obj)
+
+mlg.filter(obj_clone, distance = diss.dist) <-  0 + .Machine$double.eps^0.5
+
+obj_clone
+```
+
+```{r}
+mlg.id(obj_clone)
+```
+
+## add strata (levels of population differentiation) from a file
+```{r}
+strata_df <- read.csv("../data/strata.csv")
+obj@strata$Species <- strata_df$Species
+obj@strata$Pair <- strata_df$Pop.pair
+obj@strata$onepop <- strata_df$Onepop
+```
+
+# Find haplotypes
+```{r}
+obj_cor <- clonecorrect(obj,strata = ~onepop)
+nInd(obj_cor)
+obj_loci <- as.loci(obj_cor)
+write.csv(obj_loci, file = "../results/haplotypes_table.csv")
+```
+
+```{r}
+# obj_haplo <- read.csv("../results/haplotypes_table_with_known_haplotypes.csv")
+# obj_haplo <- as.loci(obj_haplo)
+# test <- Rst(obj_haplo, pop = "population")
+```
+
+```{r fig.width=5, fig.height=5}
+obj_haplo <- read.csv("../results/haplotypes_table_with_known_haplotypes.csv")
+obj_haplo <- as.loci(obj_haplo)
+obj_haplo <- loci2genind(obj_haplo, ploidy = 1)
+
+# make a quick MSN to find the haplotypes
+obj_haplo_dist <- diss.dist(obj_haplo, percent=FALSE)
+# obj_haplo_dist <- bruvo.dist(obj_haplo,
+                             # replen = rep(1, 10))
+
+set.seed(9002)
+min_tree <- poppr.msn(obj_haplo, distmat = obj_haplo_dist, 
+                      vertex.label = "MLG", showplot = T)
+set.seed(2)
+plot_poppr_msn(obj_haplo,
+               min_tree,
+               inds = "ALL",
+               mlg = FALSE,
+               gadj = 1,
+               glim = c(0, 1),
+               gweight = 0,
+               nodescale = 5,
+               palette = three_species,
+               cutoff = 4,
+               mlg.compute = "contracted",
+               quantiles = FALSE,
+               beforecut = TRUE,
+               pop.leg = FALSE,
+               size.leg = FALSE,
+               scale.leg = TRUE,
+               # layfun = igraph::layout.davidson.harel,
+               vertex.label.dist=0,
+               vertex.label = NULL
+               )
+```
+
+# MSN
+
+```{r fig.height=15}
+test <- obj@mlg@mlg
+
+# Manually observe default MLG names and change them with gsub
+test$custom <- gsub(pattern = "^1$", replacement = "GR-a", x = test$custom)
+test$custom <- gsub(pattern = "^2$", replacement = "GR-b", x = test$custom)
+test$custom <- gsub(pattern = "^3$", replacement = "GR-c", x = test$custom)
+test$custom <- gsub(pattern = "^4$", replacement = "GR-d", x = test$custom)
+test$custom <- gsub(pattern = "^6$", replacement = "GR-e", x = test$custom)
+test$custom <- gsub(pattern = "^8$", replacement = "GR-f", x = test$custom)
+test$custom <- gsub(pattern = "^9$", replacement = "GR-g", x = test$custom)
+test$custom <- gsub(pattern = "^10$", replacement = "GR-h", x = test$custom)
+test$custom <- gsub(pattern = "^11$", replacement = "GR-i", x = test$custom)
+test$custom <- gsub(pattern = "^12$", replacement = "6", x = test$custom)
+test$custom <- gsub(pattern = "^7$", replacement = "21", x = test$custom)
+test$custom <- gsub(pattern = "^5$", replacement = "22", x = test$custom)
+
+obj@mlg@mlg <- test
+obj@mlg@mlg$custom <- as.factor(obj@mlg@mlg$custom)
+str(obj@mlg@mlg)
+mlg.table(obj)
+
+mll.custom(obj)
+```
+
+```{r msn, fig.width=10, fig.height=10}
+obj_dist <- diss.dist(obj, percent=FALSE)
+
+set.seed(9002)
+min_tree <- poppr.msn(obj, distmat = obj_dist, 
+                      vertex.label = "MLG", showplot = T)
+```
+
+```{r MSN, fig.width=10, fig.height=10}
+# set.seed(16)
+# min_tree <- poppr.msn(obj, distmat = obj_dist, 
+#                       vertex.label = "MLG",
+#                       showplot = F, mlg.compute = "original")
+
+# plot_poppr_msn(obj, min_tree, size.leg = FALSE)
+
+set.seed(11)
+plot_poppr_msn(obj,
+               min_tree,
+               inds = "none",
+               mlg = FALSE,
+               gadj = 1,
+               glim = c(0, 1),
+               gweight = 0,
+               nodescale = 5,
+               palette = three_species,
+               cutoff = 4,
+               mlg.compute = "contracted",
+               quantiles = FALSE,
+               beforecut = TRUE,
+               pop.leg = FALSE,
+               size.leg = FALSE,
+               scale.leg = TRUE,
+               layfun = igraph::layout.davidson.harel,
+               vertex.label.dist=2,
+               vertex.label = NULL
+               )
+
+legend("topright",legend=c(levels(pop(obj))),
+       fill=three_species,
+       title = "Pop")
+```
+
+```{r MSNbyPop, fig.width=10, fig.height=10}
+setPop(obj) <- ~Pair
+
+set.seed(9002)
+min_tree <- poppr.msn(obj, distmat = obj_dist, 
+                      vertex.label = "MLG", showplot = T)
+set.seed(11)
+plot_poppr_msn(obj,
+               min_tree,
+               inds = "ALL",
+               mlg = TRUE,
+               gadj = 1,
+               glim = c(0, 1),
+               gweight = 0,
+               nodescale = 5,
+               palette = colorbyregionpop,
+               cutoff = 4,
+               mlg.compute = "custom",
+               quantiles = FALSE,
+               beforecut = TRUE,
+               pop.leg = FALSE,
+               size.leg = FALSE,
+               scale.leg = TRUE,
+               layfun = igraph::layout.davidson.harel,
+               vertex.label.dist=2,
+               vertex.label = NULL
+               )
+
+legend("topright",legend=c(levels(pop(obj))),
+       fill=colorbyregionpop,
+       title = "Pop pair")
+```
+
+# Cluster analysis
+```{r fig.width=10, fig.height=25}
+plot.phylo(upgma(obj_dist))
+```
+
+```{r}
+strata_df <- read.csv("../data/strata.csv")
+```
+
+Relative dissimilarity matrix with UPGMA
+```{r NJtree1, fig.width=8, fig.height=13, dpi=300}
+# diss <- diss.dist(obj)
+tr_dist_upgma <- nj(obj_dist)
+
+df <- data.frame(label = tr_dist_upgma$tip.label,
+                 Species = strata_df$Species)
+
+tr_dist_upgma_plot <- ggtree(tr_dist_upgma,
+                             layout="rect", aes(color=Species)) %<+% df +
+  geom_tiplab(size=2, nudge_x = 0.1) +
+  geom_tippoint(size=1) +
+  # geom_text(aes(label=node)) +
+  theme_tree2(legend.position = c(0.5, 0.5), legend.direction = "vertical",
+              legend.title = element_text(colour = "black", face = "bold"),
+              legend.text = element_text(size = 9),
+              axis.text.x = element_text(size = 9))
+  # geom_treescale(fontsize = 3)
+  # coord_cartesian(xlim = c(-0.03, 0.13), ylim = c(-0.02,0.15))
+  # coord_cartesian(clip = 'off', xlim = c(-8, 1))
+  # theme_tree2(plot.margin=margin(6, 120, 6, 6))
+
+tr_dist_upgma_plot
+
+# revts(tr_dist_upgma_plot) + theme(legend.title = element_text(size = 8)) +
+  # scale_color_manual(values = citrus,
+  #                    breaks = c("Orange", "Lime", "Tangerine",
+  #                               "Lemon", "Citron", "Bergamot")) +
+  # scale_shape_manual(values = c(0:9, 11, 21:25)) +
+  # scale_x_continuous(breaks=seq(-9, 0, 1),
+  #                    limits = c(-9.5, 1),
+  #                    labels=abs(seq(-9, 0, 1)))+
+  # labs(colour = "Species") +
+  # theme(legend.title = element_text(size = 9))
+
+# ggsave("../results/UPGMA_tree_samples-for-seq.png", 
+       # dpi = 300, width = 7, height = 13)
+```
+
+Relative dissimilarity matrix with NJ
+```{r NJtree2, fig.width=25, fig.height=25, dpi=300}
+# diss <- diss.dist(obj)
+tr_dist_nj <- nj(obj_dist)
+
+df <- data.frame(label = tr_dist_nj$tip.label,
+                 Species = strata_df$Species)
+
+tr_dist_nj_plot <- ggtree(tr_dist_nj, layout="ape", aes(color=Species)) %<+% df +
+  # geom_tiplab(size=2, nudge_x = 0.1) +
+  geom_tippoint(size=1) +
+  geom_label_repel(aes(label=label), max.overlaps = 1000) +
+  # theme_tree(legend.position = "bottom", legend.direction = "vertical",
+  #             legend.title = element_text(colour = "black", face = "bold"),
+  #             legend.text = element_text(size = 9),
+  #             axis.text.x = element_text(size = 9))
+  geom_treescale(fontsize = 3)
+  # coord_cartesian(xlim = c(-0.03, 0.13), ylim = c(-0.02,0.15))
+  coord_cartesian(clip = 'off', xlim = c(-4, 1))
+  # theme_tree2(plot.margin=margin(6, 120, 6, 6))
+
+
+
+tr_dist_nj_plot 
+
+
+# theme(legend.title = element_text(size = 8)) +
+  # scale_color_manual(values = citrus,
+  #                    breaks = c("Orange", "Lime", "Tangerine",
+  #                               "Lemon", "Citron", "Bergamot")) +
+  # scale_shape_manual(values = c(0:9, 11, 21:25)) +
+  # scale_x_continuous(breaks=seq(-9, 0, 1),
+  #                    limits = c(-9.5, 1),
+  #                    labels=abs(seq(-9, 0, 1)))+
+  # labs(colour = "Species", shape = "Location") +
+  # theme(legend.title = element_text(size = 9))
+
+# ggsave("../results/UPGMA_tree_samples-for-seq.png", 
+       # dpi = 300, width = 7, height = 13)
+```
+
+# Map with pie charts
+```{r}
+obj@mlg@mlg$original <- obj@mlg@mlg$custom
+mlg_freqs <- mlg.table(obj)
+colnames(mlg_freqs) <- c("21", "22", "6", "GR-a", "GR-b", "GR-c", "GR-d", 
+                         "GR-e", "GR-f", "GR-g", "GR-h", "GR-i")
+mlg_freqs <- as.data.frame(mlg_freqs)
+mlg_freqs$Pair <- rownames(mlg_freqs)
+```
+
+```{r pie_chart_map, fig.width=5, fig.height=5.2}
+pop_coords <- read.csv("../data/pop_metadata.csv")
+str(pop_coords)
+
+mlg_freqs <- full_join(mlg_freqs, pop_coords)
+
+world <- map_data("world")
+m <- ggplot() +
+  borders("world", fill="grey90", colour="grey")+
+  coord_cartesian(xlim = c(22, 24), ylim = c(39.2,41.4)) +
+  geom_scatterpie(data = mlg_freqs, aes(x=Longitudefake, y=Latitude, r=.1),
+                  cols=c("21", "22", "6", "GR-a", "GR-b", "GR-c", "GR-d", 
+                         "GR-e", "GR-f", "GR-g", "GR-h", "GR-i")) +
+  geom_text(data=mlg_freqs, aes(x=Longitudefake, y=Latitude, label = Pair,
+                           vjust = -1.8), size=3)+
+  # scale_size_manual(values = c(4,5)) +
+  # scale_color_manual(values = c("red", "black")) +
+  scale_fill_manual(values = kr12)+
+  theme_bw() +
+  theme(legend.position = "bottom") +
+  labs(x = "Longitude", y = "Latitude")
+
+m
+```
+
+```{r fig.width=2, fig.height=2}
+m_inset <- ggplot() +
+  borders("world", fill="grey90", colour="grey")+
+  coord_cartesian(xlim = c(25.7, 26.7), ylim = c(38.8,40)) +
+  geom_scatterpie(data = mlg_freqs, aes(x=Longitudefake, y=Latitude, r=.15),
+                  cols=c("21", "22", "6", "GR-a", "GR-b", "GR-c", "GR-d", 
+                         "GR-e", "GR-f", "GR-g", "GR-h", "GR-i")) +
+  geom_text(data=mlg_freqs, aes(x=Longitudefake, y=Latitude, label = Pair,
+                           vjust = -1.8), size=3)+
+  # scale_size_manual(values = c(4,5)) +
+  # scale_color_manual(values = c("red", "black")) +
+  scale_fill_manual(values = kr12)+
+  theme_bw() +
+  theme(legend.position = "none")
+  labs(x = "", y = "")
+
+m_inset
+```
+
+
+```{r fig.width=5, fig.height=5.2, dpi=300}
+m_with_inset <-
+  ggdraw() +
+  draw_plot(m) +
+  draw_plot(m_inset, x = .55, y = .2, width = .45, height = .4)
+
+m_with_inset
+# 
+# ggsave(filename = "WGRS_pca.png",
+#        path = "../results/figs", dpi=300,
+#        width = 7, height = 7)
+```
